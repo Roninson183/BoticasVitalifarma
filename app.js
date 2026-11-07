@@ -694,7 +694,10 @@ DB.onChange(() => {
   refresh();
 });
 DB.onRemoteLow(p => toast(`⚠️ Se vendió "${p.name}" en otro equipo: quedan ${p.stock}. Reponer cuanto antes.`, 'warn', 8000));
-DB.onError(msg => toast(msg, 'error', 6000));
+DB.onError(msg => {
+  toast(msg, 'error', 6000);
+  if (!dataLoaded && !connError) { connError = msg; showApp(); }   // muestra el motivo en vez de quedar en blanco
+});
 
 // ---------- Inicio ----------
 setTimeout(() => {
