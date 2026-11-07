@@ -5,7 +5,7 @@
    - Cada vendedor entra con su correo y clave.
    ============================================================ */
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, createUserWithEmailAndPassword }
+import { getAuth, onAuthStateChanged, signInAnonymously }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
@@ -76,62 +76,17 @@ function stopListeners() {
   products = []; sales = [];
 }
 
-// ---------- Perfil de usuario y aprobación ----------
-let profileUnsub = null, usersUnsub = null, dataOn = false;
-let users = [];
-let usersCb = () => {};
-
-function stopAll() {
-  if (profileUnsub) { profileUnsub(); profileUnsub = null; }
-  if (usersUnsub) { usersUnsub(); usersUnsub = null; }
-  stopListeners();
-  dataOn = false;
-  users = [];
-}
-
 // ---------- API que usa la aplicación ----------
 window.DB = {
   configured,
 
-  // Sesión: cb(usuario, perfil). El perfil dice si el administrador ya aprobó la cuenta.
+  // Conexión automática (sin pantalla de ingreso): cb(usuario, error)
   onAuth(cb) {
-    if (!configured) { cb(null, null); return; }
+    if (!configured) { cb(null, { code: "config/missing" }); return; }
     onAuthStateChanged(auth, user => {
-      stopAll();
-      if (!user) { cb(null, null); return; }
-      profileUnsub = onSnapshot(doc(fs, "users", user.uid), snap => {
-        const profile = snap.exists() ? { uid: user.uid, ...snap.data() } : null;
-        const ok = !!profile && profile.approved === true;
-        const admin = ok && profile.role === "admin";
-        if (ok && !dataOn) { dataOn = true; startListeners(); }
-        if (!ok && dataOn) { dataOn = false; stopListeners(); }
-        if (admin && !usersUnsub) {
-          usersUnsub = onSnapshot(collection(fs, "users"), s => {
-            users = s.docs.map(d => ({ uid: d.id, ...d.data() }));
-            usersCb();
-          }, fail);
-        }
-        if (!admin && usersUnsub) { usersUnsub(); usersUnsub = null; users = []; }
-        cb(user, profile);
-      }, err => { fail(err); cb(user, null); });
+      if (user) { startListeners(); cb(user, null); }
+      else signInAnonymously(auth).catch(err => { stopListeners(); cb(null, err); });
     });
-  },
-  login: (email, pass) => signInWithEmailAndPassword(auth, email, pass),
-  logout: () => signOut(auth),
-
-  // Registro: crea la cuenta y queda PENDIENTE hasta que el administrador la apruebe
-  async register(name, email, pass) {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    await setDoc(doc(fs, "users", cred.user.uid), {
-      name, email, approved: false, role: "vendedor", created: Date.now()
-    });
-  },
-
-  // Administración del personal (solo administrador)
-  users: () => users,
-  onUsers(cb) { usersCb = cb; },
-  setUserApproved(uid, value) {
-    updateDoc(doc(fs, "users", uid), { approved: !!value }).catch(fail);
   },
 
   // Suscripciones
