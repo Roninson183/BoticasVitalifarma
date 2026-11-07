@@ -167,7 +167,6 @@ function render() {
   else if (state.view === 'products') v.innerHTML = viewProducts();
   else if (state.view === 'sell') { v.innerHTML = viewSell(); renderCart(); }
   else if (state.view === 'reports') { v.innerHTML = viewReports(); drawCharts(); animateKpis(); }
-  else if (state.view === 'staff') v.innerHTML = viewStaff();
   updateAlerts();
 }
 
@@ -303,6 +302,8 @@ function viewSell() {
     </section>
     <section class="card">
       <h2>Venta actual</h2>
+      <label for="sellerName" style="margin-top:0">Vendedor (quién atiende)</label>
+      <input id="sellerName" placeholder="Ej: Rosa" value="${esc(getSeller())}" autocomplete="off">
       <div id="cartBox"></div>
     </section>
   </div>`;
@@ -373,6 +374,11 @@ function changeText(total) {
 
 function confirmSale() {
   if (!state.cart.length) return;
+  if (!getSeller().trim()) {
+    toast('Escriba el nombre del vendedor para registrar la venta.', 'warn');
+    const i = $('#sellerName'); if (i) i.focus();
+    return;
+  }
   const total = cartTotal();
   if (state.method === 'Efectivo' && state.received !== '' && Number(state.received) < total) {
     toast('El efectivo recibido no alcanza para el total.', 'error'); return;
@@ -506,27 +512,6 @@ function drawCharts() {
   }));
 }
 
-function viewStaff() {
-  const list = DB.users().slice().sort((a, b) =>
-    (a.approved === b.approved ? 0 : a.approved ? 1 : -1) || String(a.name).localeCompare(String(b.name), 'es'));
-  const cards = list.map(u => {
-    const me = currentUser && u.uid === currentUser.uid;
-    const badge = u.role === 'admin' ? '<span class="badge green">Administrador</span>'
-      : u.approved ? '<span class="badge green">Activo</span>' : '<span class="badge orange">Pendiente</span>';
-    const btn = me || u.role === 'admin' ? ''
-      : u.approved ? `<button class="btn sm danger" data-act="disable" data-uid="${u.uid}">Desactivar</button>`
-      : `<button class="btn sm primary" data-act="approve" data-uid="${u.uid}">Aprobar</button>`;
-    return `<article class="product ${!u.approved ? 'warn' : ''}">
-      <h3>${esc(u.name || 'Sin nombre')}${me ? ' (usted)' : ''}</h3>
-      <div class="code">${esc(u.email)}</div>
-      <div class="badges">${badge}</div>
-      <div class="actions">${btn}</div></article>`;
-  }).join('');
-  return `<h2>Personal con acceso</h2>
-    <p class="hint" style="margin-bottom:14px">Los vendedores se registran desde la pantalla de ingreso. Aquí usted aprueba o desactiva su acceso.</p>
-    ${cards ? `<div class="products">${cards}</div>` : '<div class="empty">Aún no hay usuarios.</div>'}`;
-}
-
 function animateKpis() {
   document.querySelectorAll('.kpi b[data-v]').forEach(el => {
     const end = Number(el.dataset.v), isMoney = !!el.dataset.m, t0 = performance.now(), dur = 700;
@@ -544,11 +529,6 @@ const actions = {
   tab(el) { Scan.stop(); state.line = el.dataset.line; state.search = ''; render(); },
   nav(el) { go(el.dataset.view); },
   bell: showAlerts,
-  toggleReg() { setMode(!regMode); },
-  logoutNow() { DB.logout(); },
-  approve(el) { DB.setUserApproved(el.dataset.uid, true); toast('Vendedor aprobado', 'ok'); },
-  disable(el) { if (confirm('¿Quitar el acceso a este vendedor?')) { DB.setUserApproved(el.dataset.uid, false); toast('Acceso desactivado', 'ok'); } },
-  logout() { if (confirm('¿Cerrar sesión?')) { state.cart = []; DB.logout(); } },
   closeModal,
   closeBack(el, e) { if (e.target === el) closeModal(); },
 
@@ -608,7 +588,6 @@ document.addEventListener('click', e => {
 document.addEventListener('submit', e => {
   e.preventDefault();
   if (e.target.id === 'pf') saveProductForm(e.target);
-  if (e.target.id === 'lf') { if (regMode) doRegister(); else doLogin(); }
   if (e.target.id === 'rf') {
     const qty = parseInt($('#rfQty').value, 10);
     if (qty > 0) { DB.restock(e.target.dataset.id, qty); closeModal(); toast('Stock actualizado', 'ok'); render(); }
@@ -628,6 +607,8 @@ document.addEventListener('input', e => {
     box.innerHTML = res.length
       ? res.map(p => `<button data-act="addid" data-id="${p.id}"><span>${esc(p.name)}</span><b>${money(p.price)} · stock ${p.stock}</b></button>`).join('')
       : '<p class="hint">Sin resultados.</p>';
+  } else if (t.id === 'sellerName') {
+    try { localStorage.setItem(SELLER_KEY, t.value); } catch (err) { /* sin guardar */ }
   } else if (t.id === 'recv') {
     state.received = t.value;
     $('#changeOut').textContent = changeText(cartTotal());
@@ -643,100 +624,38 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') closeModal();
 });
 
-// ---------- Sesión y sincronización ----------
-let currentUser = null;
-let currentProfile = null;
+// ---------- Conexión y sincronización ----------
 let splashDone = false;
+let connError = '';
+let dataLoaded = false;
 let firstData = true;
-let appShown = false;
 let reportTimer = null;
-let regMode = false;
-let lastPending = 0;
 
-const isApproved = () => !!(currentProfile && currentProfile.approved === true);
-const isAdmin = () => isApproved() && currentProfile.role === 'admin';
-const userLabel = () => (currentProfile && currentProfile.name) || (currentUser ? currentUser.email.split('@')[0] : '');
-
-function showErr(msg) { const e = $('#lfErr'); e.hidden = false; e.textContent = msg; }
-
-function setMode(reg) {
-  regMode = reg;
-  $('#lfTitle').textContent = reg ? 'Crear cuenta de vendedor' : 'Ingreso del personal';
-  $('#lfNameWrap').hidden = !reg;
-  $('#lfName').required = reg;
-  $('#lfBtn').textContent = reg ? 'Crear cuenta' : 'Ingresar';
-  $('#lfToggle').textContent = reg ? 'Ya tengo cuenta: ingresar' : '¿Es nuevo? Cree su cuenta';
-  $('#lfPass').autocomplete = reg ? 'new-password' : 'current-password';
-  $('#lfErr').hidden = true;
-}
-
-function updateStaffNav() {
-  const b = document.querySelector('#mainNav [data-view="staff"]');
-  if (!b) return;
-  b.hidden = !isAdmin();
-  const n = DB.users().filter(u => !u.approved).length;
-  b.innerHTML = `<span>👥</span>Personal${n ? ` (${n})` : ''}`;
-  return n;
-}
-
-function showScreen() {
-  if (!splashDone) return;
-  const logged = !!currentUser, ok = logged && isApproved();
-  $('#login').hidden = logged;
-  $('#pending').hidden = !(logged && !ok);
-  $('#app').hidden = !ok;
-  if (!logged) {
-    appShown = false;
-    $('#lfErr').hidden = true;
-    if (!DB.configured) showErr('Falta configurar firebase-config.js con los datos de su proyecto Firebase.');
-  }
-  if (ok) {
-    $('#userName').textContent = userLabel();
-    updateStaffNav();
-    if (state.view === 'staff' && !isAdmin()) state.view = 'catalog';
-    if (!appShown) { appShown = true; firstData = true; }
-    render();
-  } else appShown = false;
-}
+const SELLER_KEY = 'vitalifarma_vendedor';
+function getSeller() { try { return localStorage.getItem(SELLER_KEY) || ''; } catch (e) { return ''; } }
+const userLabel = () => getSeller().trim() || 'Sin nombre';
 
 // Explica en español los errores de configuración de Firebase
 function authHint(code) {
   const map = {
-    'auth/operation-not-allowed': 'Falta activar "Correo electrónico/contraseña" en Firebase → Authentication → Método de acceso.',
+    'config/missing': 'Falta configurar firebase-config.js con los datos de su proyecto Firebase.',
+    'auth/operation-not-allowed': 'Active el acceso "Anónimo" en Firebase → Authentication → Método de acceso.',
+    'auth/admin-restricted-operation': 'Active el acceso "Anónimo" en Firebase → Authentication → Método de acceso.',
     'auth/configuration-not-found': 'Falta iniciar Authentication en Firebase (botón "Comenzar" en la sección Authentication).',
     'auth/invalid-api-key': 'La apiKey de firebase-config.js no es correcta. Vuelva a copiarla desde Firebase.',
-    'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'La apiKey de firebase-config.js no es correcta. Vuelva a copiarla desde Firebase.',
-    'auth/app-not-authorized': 'Esta app no está autorizada para usar ese proyecto de Firebase. Revise firebase-config.js.',
-    'auth/unauthorized-domain': 'Agregue este dominio en Authentication → Configuración → Dominios autorizados.',
-    'auth/network-request-failed': 'Sin conexión a internet.',
-    'auth/too-many-requests': 'Demasiados intentos. Espere unos minutos.',
-    'permission-denied': 'Las reglas de Firestore no permiten esto. Publique las reglas nuevas en Firestore → Reglas.'
+    'auth/network-request-failed': 'Sin conexión a internet.'
   };
   return map[code] || null;
 }
 
-function doLogin() {
-  $('#lfErr').hidden = true;
-  DB.login($('#lfEmail').value.trim(), $('#lfPass').value).catch(e => {
-    const code = e && e.code;
-    const wrong = ['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'];
-    showErr(wrong.includes(code) ? 'Correo o clave incorrectos.'
-      : authHint(code) || `No se pudo ingresar (${code || 'error desconocido'}).`);
-  });
-}
-
-function doRegister() {
-  $('#lfErr').hidden = true;
-  const name = $('#lfName').value.trim(), email = $('#lfEmail').value.trim(), pass = $('#lfPass').value;
-  if (name.length < 2) { showErr('Escriba su nombre completo.'); return; }
-  if (pass.length < 6) { showErr('La clave debe tener al menos 6 caracteres.'); return; }
-  DB.register(name, email, pass).catch(e => {
-    const code = e && e.code;
-    showErr(code === 'auth/email-already-in-use' ? 'Ese correo ya está registrado. Use "Ya tengo cuenta".'
-      : code === 'auth/invalid-email' ? 'El correo no es válido.'
-      : code === 'auth/weak-password' ? 'La clave es muy débil (mínimo 6 caracteres).'
-      : authHint(code) || `No se pudo crear la cuenta (${code || 'error desconocido'}).`);
-  });
+function showApp() {
+  if (!splashDone || !(dataLoaded || connError)) return;
+  window.__ready = true;
+  $('#app').hidden = false;
+  const f = $('#fatal');
+  f.hidden = !connError;
+  f.textContent = connError;
+  render();
 }
 
 // Se ejecuta cada vez que cambian los datos (desde cualquier dispositivo)
@@ -758,7 +677,7 @@ function refresh() {
     clearTimeout(reportTimer);
     reportTimer = setTimeout(() => { if (state.view === 'reports') render(); }, 300);
   }
-  if (firstData && currentUser) {
+  if (firstData) {
     firstData = false;
     const a = getAlerts();
     const low = a.out.length + a.low.length;
@@ -766,14 +685,14 @@ function refresh() {
   }
 }
 
-DB.onAuth((u, profile) => { currentUser = u; currentProfile = profile; showScreen(); });
-DB.onUsers(() => {
-  const n = updateStaffNav();
-  if (isAdmin() && n > lastPending) toast('👥 Un vendedor nuevo pide acceso. Revise la sección Personal.', 'warn', 7000);
-  lastPending = n || 0;
-  if (state.view === 'staff') render();
+DB.onAuth((user, err) => {
+  connError = err ? (authHint(err.code) || `No se pudo conectar (${err.code || 'error desconocido'}).`) : '';
+  showApp();
 });
-DB.onChange(() => { if (currentUser) refresh(); });
+DB.onChange(() => {
+  if (!dataLoaded) { dataLoaded = true; showApp(); return; }
+  refresh();
+});
 DB.onRemoteLow(p => toast(`⚠️ Se vendió "${p.name}" en otro equipo: quedan ${p.stock}. Reponer cuanto antes.`, 'warn', 8000));
 DB.onError(msg => toast(msg, 'error', 6000));
 
@@ -782,5 +701,5 @@ setTimeout(() => {
   splashDone = true;
   const sp = $('#splash');
   if (sp) { sp.classList.add('hide'); setTimeout(() => sp.remove(), 600); }
-  showScreen();
+  showApp();
 }, SPLASH_MS);
