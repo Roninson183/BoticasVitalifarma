@@ -64,6 +64,16 @@
   <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <script>
+    /* Registro de errores para mostrarlos en pantalla si el sistema no arranca */
+    var __errs = [];
+    window.addEventListener('error', function (e) {
+      __errs.push(e.target && e.target.src ? 'No cargó el archivo: ' + e.target.src.split('/').pop() : (e.message || 'error desconocido'));
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      __errs.push(String((e.reason && (e.reason.message || e.reason.code)) || e.reason));
+    });
+  </script>
+  <script>
     /* Plan de seguridad: la bienvenida se quita a los 2 s. Si el sistema aún no está listo
        se avisa "Conectando…" y, solo tras 10 s más, se muestra el error con las causas. */
     setTimeout(function () {
@@ -77,6 +87,10 @@
         setTimeout(function () {
           if (window.__ready) return;
           f.innerHTML = 'No se pudo conectar.<br>1) Ábralo con Live Server o desde su página de GitHub (no con doble clic).<br>2) Verifique que existan <b>storage.js</b> y <b>firebase-config.js</b> junto a index.html.<br>3) Pulse F12 → Console para ver el error.';
+          var d = document.createElement('div');
+          d.style.cssText = 'margin-top:10px;font-weight:400;word-break:break-word';
+          d.textContent = 'Detalle técnico: ' + (__errs.length ? __errs.join(' | ') : 'sin errores de carga; Firebase no respondió (revise Firestore, Authentication Anónimo, reglas e internet).');
+          f.appendChild(d);
         }, 10000);
       }, 700);
     }, 2000);
