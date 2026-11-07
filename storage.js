@@ -41,6 +41,8 @@ function fail(err) {
   console.error(err);
   const code = err && err.code;
   if (code === "permission-denied") errCb("Sin permiso en la base de datos. Revise las reglas de Firestore.");
+  else if (code === "not-found") errCb("No existe la base de datos. En Firebase → Firestore Database, pulse \"Crear base de datos\".");
+  else if (code === "unauthenticated") errCb("No se pudo iniciar la conexión anónima. Active el acceso Anónimo en Authentication.");
   else if (code === "unavailable") errCb("Sin conexión. Los cambios se enviarán cuando vuelva el internet.");
   else errCb("Error: " + (err && err.message ? err.message : err));
 }
