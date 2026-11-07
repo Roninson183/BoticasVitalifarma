@@ -6,7 +6,7 @@
    reglas de Firestore y las cuentas del personal.
    ============================================================ */
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: "AIzaSyBL1rCmtlis4ALvU_z7gd8yvbu_5CfoAUw",
   authDomain: "boticasvitalifarma.firebaseapp.com",
   projectId: "boticasvitalifarma",
