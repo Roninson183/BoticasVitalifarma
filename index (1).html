@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1d2399">
+  <title>Vitalifarma · Inventario y ventas</title>
+  <link rel="icon" href="logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- 1. PANTALLA DE BIENVENIDA (2 segundos) -->
+  <div id="splash">
+    <span class="cross c1">✚</span><span class="cross c2">✚</span><span class="cross c3">✚</span><span class="cross c4">✚</span>
+    <div class="logo-card"><img src="logo.png" alt="Boticas Vitalifarma"></div>
+    <h1>¡Bienvenido!</h1>
+    <p>Inventario y ventas</p>
+    <div class="loader"></div>
+  </div>
+
+  <!-- 1b. INGRESO / REGISTRO DEL PERSONAL -->
+  <div id="login" hidden>
+    <form id="lf" class="login-card">
+      <img src="logo.png" alt="Boticas Vitalifarma">
+      <h2 id="lfTitle">Ingreso del personal</h2>
+      <div id="lfNameWrap" hidden>
+        <label for="lfName">Nombre completo</label>
+        <input id="lfName" autocomplete="name">
+      </div>
+      <label for="lfEmail">Correo</label>
+      <input id="lfEmail" type="email" required autocomplete="username" inputmode="email">
+      <label for="lfPass">Clave</label>
+      <input id="lfPass" type="password" required autocomplete="current-password">
+      <p id="lfErr" class="login-err" hidden></p>
+      <button id="lfBtn" class="btn primary big" type="submit" style="margin-top:16px">Ingresar</button>
+      <button id="lfToggle" class="link-btn" type="button" data-act="toggleReg">¿Es nuevo? Cree su cuenta</button>
+    </form>
+  </div>
+
+  <!-- 1c. CUENTA PENDIENTE DE APROBACIÓN -->
+  <div id="pending" hidden>
+    <div class="login-card">
+      <img src="logo.png" alt="Boticas Vitalifarma">
+      <h2>Cuenta pendiente</h2>
+      <p class="hint" style="text-align:center;margin:8px 0 16px">Su cuenta fue creada. El administrador debe aprobarla para que pueda entrar. Esta pantalla se actualiza sola cuando lo haga.</p>
+      <button class="btn big" data-act="logoutNow">Salir</button>
+    </div>
+  </div>
+
+  <!-- 2. APLICACIÓN -->
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <img src="logo.png" alt="Boticas Vitalifarma">
+      </div>
+      <div class="right">
+        <span id="userName" class="user-name"></span>
+        <button class="btn sm" data-act="logout">Salir</button>
+        <button class="bell" data-act="bell" aria-label="Ver alertas">
+          🔔<span id="bellCount" class="bell-count" hidden>0</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Las dos secciones principales (arriba en celular, tablet y PC) -->
+    <div class="lines" id="lineTabs">
+      <button data-act="tab" data-line="vitalifarma">BOTICAS VITALIFARMA</button>
+      <button data-act="tab" data-line="natural">PRODUCTOS NATURALES</button>
+    </div>
+
+    <div id="alertBar" class="alert-bar" data-act="bell" hidden></div>
+
+    <nav id="mainNav">
+      <button data-act="nav" data-view="catalog"><span>📋</span>Catálogo</button>
+      <button data-act="nav" data-view="sell"><span>🛒</span>Vender</button>
+      <button data-act="nav" data-view="products"><span>📦</span>Inventario</button>
+      <button data-act="nav" data-view="reports"><span>📊</span>Reportes</button>
+      <button data-act="nav" data-view="staff" hidden><span>👥</span>Personal</button>
+    </nav>
+
+    <main id="view"></main>
+  </div>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="modalRoot"></div>
+
+  <!-- Librerías (necesitan internet): gráficos y lector de código de barras -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+
+  <script>
+    /* Plan de seguridad: la bienvenida siempre se quita a los 2 s. Si el sistema aún no
+       cargó, se avisa "Cargando…" y, solo tras 10 s, se muestra el error con las causas. */
+    setTimeout(function () {
+      var sp = document.getElementById('splash');
+      if (sp) sp.classList.add('hide');
+      setTimeout(function () {
+        if (sp && sp.parentNode) sp.parentNode.removeChild(sp);
+        if (window.DB) return;
+        var login = document.getElementById('login'), err = document.getElementById('lfErr');
+        login.hidden = false; err.hidden = false;
+        err.textContent = 'Cargando el sistema… espere un momento.';
+        setTimeout(function () {
+          if (window.DB) return;
+          err.innerHTML = 'No se pudo cargar el sistema.<br>1) Ábralo con Live Server o desde su página de GitHub (no con doble clic).<br>2) Verifique que existan <b>storage.js</b> y <b>firebase-config.js</b> junto a index.html.<br>3) Pulse F12 → Console para ver el error.';
+        }, 8000);
+      }, 700);
+    }, 2000);
+  </script>
+  <script type="module" src="storage.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
