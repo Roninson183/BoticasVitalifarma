@@ -699,13 +699,29 @@ function showScreen() {
   } else appShown = false;
 }
 
+// Explica en español los errores de configuración de Firebase
+function authHint(code) {
+  const map = {
+    'auth/operation-not-allowed': 'Falta activar "Correo electrónico/contraseña" en Firebase → Authentication → Método de acceso.',
+    'auth/configuration-not-found': 'Falta iniciar Authentication en Firebase (botón "Comenzar" en la sección Authentication).',
+    'auth/invalid-api-key': 'La apiKey de firebase-config.js no es correcta. Vuelva a copiarla desde Firebase.',
+    'auth/api-key-not-valid.-please-pass-a-valid-api-key.': 'La apiKey de firebase-config.js no es correcta. Vuelva a copiarla desde Firebase.',
+    'auth/app-not-authorized': 'Esta app no está autorizada para usar ese proyecto de Firebase. Revise firebase-config.js.',
+    'auth/unauthorized-domain': 'Agregue este dominio en Authentication → Configuración → Dominios autorizados.',
+    'auth/network-request-failed': 'Sin conexión a internet.',
+    'auth/too-many-requests': 'Demasiados intentos. Espere unos minutos.',
+    'permission-denied': 'Las reglas de Firestore no permiten esto. Publique las reglas nuevas en Firestore → Reglas.'
+  };
+  return map[code] || null;
+}
+
 function doLogin() {
   $('#lfErr').hidden = true;
   DB.login($('#lfEmail').value.trim(), $('#lfPass').value).catch(e => {
     const code = e && e.code;
-    showErr(code === 'auth/network-request-failed' ? 'Sin conexión a internet.'
-      : code === 'auth/too-many-requests' ? 'Demasiados intentos. Espere unos minutos.'
-      : 'Correo o clave incorrectos.');
+    const wrong = ['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-email'];
+    showErr(wrong.includes(code) ? 'Correo o clave incorrectos.'
+      : authHint(code) || `No se pudo ingresar (${code || 'error desconocido'}).`);
   });
 }
 
@@ -719,8 +735,7 @@ function doRegister() {
     showErr(code === 'auth/email-already-in-use' ? 'Ese correo ya está registrado. Use "Ya tengo cuenta".'
       : code === 'auth/invalid-email' ? 'El correo no es válido.'
       : code === 'auth/weak-password' ? 'La clave es muy débil (mínimo 6 caracteres).'
-      : code === 'auth/network-request-failed' ? 'Sin conexión a internet.'
-      : 'No se pudo crear la cuenta. Intente de nuevo.');
+      : authHint(code) || `No se pudo crear la cuenta (${code || 'error desconocido'}).`);
   });
 }
 
