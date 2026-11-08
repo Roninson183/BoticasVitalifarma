@@ -18,7 +18,8 @@ const state = {
   cart: [],            // [{id, qty}]
   method: 'Efectivo',
   received: '',
-  range: 7             // días del reporte
+  range: 7,            // días del reporte
+  scanPres: 'unit'     // presentación al escanear: unit | blister | box
 };
 
 function daysToExpiry(p) {
@@ -181,13 +182,17 @@ function productCard(p, admin) {
   else if (d <= EXPIRY_WARN_DAYS) expBadge = `<span class="badge orange">Vence en ${d} d</span>`;
   const cls = (p.stock === 0 || d < 0) ? 'bad' : (p.stock <= p.minStock || d <= EXPIRY_WARN_DAYS) ? 'warn' : '';
   const margin = p.price - p.cost;
+  const extra = DB.presList(p).filter(o => o.key !== 'unit');
+  const presTxt = extra.length
+    ? `<div class="pres-line">${extra.map(o => `${o.label} x${o.units}: <b>${money(o.price)}</b>`).join(' · ')}</div>` : '';
   return `<article class="product ${cls}">
     <h3>${esc(p.name)}</h3>
     <div class="code">Código: ${esc(p.code)}</div>
-    <div class="price">${money(p.price)}</div>
-    <div class="meta"><span>Stock: <b>${p.stock}</b></span><span>Vence: <b>${fmtExpiry(p.expiry)}</b></span></div>
+    <div class="price">${money(p.price)}${extra.length ? ' <small>c/unidad</small>' : ''}</div>
+    ${presTxt}
+    <div class="meta"><span>Stock: <b>${p.stock}</b> unid.</span><span>Vence: <b>${fmtExpiry(p.expiry)}</b></span></div>
     <div class="badges">${stockBadge}${expBadge}</div>
-    ${admin ? `<div class="meta"><span>Costo: <b>${money(p.cost)}</b></span><span>Ganancia: <b>${money(margin)}</b></span></div>
+    ${admin ? `<div class="meta"><span>Costo unid.: <b>${money(p.cost)}</b></span><span>Ganancia unid.: <b>${money(margin)}</b></span></div>
     <div class="actions">
       <button class="btn sm" data-act="edit" data-id="${p.id}">Editar</button>
       <button class="btn sm" data-act="restock" data-id="${p.id}">+ Reponer</button>
@@ -229,7 +234,7 @@ function viewProducts() {
 }
 
 function productForm(id) {
-  const p = id ? DB.product(id) : { code: '', name: '', line: state.line, cost: '', price: '', stock: '', minStock: 10, expiry: '' };
+  const p = id ? DB.product(id) : { code: '', name: '', line: state.line, cost: '', price: '', stock: '', minStock: 10, expiry: '', blisterUnits: 0, blisterPrice: 0, boxUnits: 0, boxPrice: 0 };
   openModal(`<h2>${id ? 'Editar' : 'Nuevo'} producto</h2>
     <form id="pf" data-id="${id || ''}">
       <label>Código de barras</label>
@@ -246,10 +251,20 @@ function productForm(id) {
         <option value="natural" ${p.line === 'natural' ? 'selected' : ''}>${LINES.natural}</option>
       </select>
       <div class="grid2">
-        <div><label>Precio de costo (S/)</label><input id="pfCost" type="number" step="0.01" min="0" required value="${p.cost}"></div>
-        <div><label>Precio de venta (S/)</label><input id="pfPrice" type="number" step="0.01" min="0.01" required value="${p.price}"></div>
-        <div><label>Stock actual</label><input id="pfStock" type="number" step="1" min="0" required value="${p.stock}"></div>
+        <div><label>Costo por unidad (S/)</label><input id="pfCost" type="number" step="0.01" min="0" required value="${p.cost}"></div>
+        <div><label>Precio por unidad (S/)</label><input id="pfPrice" type="number" step="0.01" min="0.01" required value="${p.price}"></div>
+        <div><label>Stock actual (en unidades)</label><input id="pfStock" type="number" step="1" min="0" required value="${p.stock}"></div>
         <div><label>Stock mínimo (alerta)</label><input id="pfMin" type="number" step="1" min="0" required value="${p.minStock}"></div>
+      </div>
+      <div class="pres-box">
+        <strong>Otras presentaciones (opcional)</strong>
+        <p class="hint">El stock se cuenta en unidades sueltas. Si un blister trae 10 pastillas, escriba 10 y su precio. Deje en blanco lo que no venda.</p>
+        <div class="grid2">
+          <div><label>Unidades por blister</label><input id="pfBU" type="number" step="1" min="0" inputmode="numeric" value="${p.blisterUnits || ''}"></div>
+          <div><label>Precio del blister (S/)</label><input id="pfBP" type="number" step="0.01" min="0" inputmode="decimal" value="${p.blisterPrice || ''}"></div>
+          <div><label>Unidades por caja</label><input id="pfXU" type="number" step="1" min="0" inputmode="numeric" value="${p.boxUnits || ''}"></div>
+          <div><label>Precio de la caja (S/)</label><input id="pfXP" type="number" step="0.01" min="0" inputmode="decimal" value="${p.boxPrice || ''}"></div>
+        </div>
       </div>
       <label>Fecha de vencimiento</label>
       <input id="pfExp" type="date" required value="${p.expiry}">
@@ -271,9 +286,17 @@ function saveProductForm(form) {
     price: Number($('#pfPrice').value),
     stock: parseInt($('#pfStock').value, 10),
     minStock: parseInt($('#pfMin').value, 10),
-    expiry: $('#pfExp').value
+    expiry: $('#pfExp').value,
+    blisterUnits: parseInt($('#pfBU').value, 10) || 0,
+    blisterPrice: Number($('#pfBP').value) || 0,
+    boxUnits: parseInt($('#pfXU').value, 10) || 0,
+    boxPrice: Number($('#pfXP').value) || 0
   };
   if (!p.name || !p.code) { toast('Complete código y nombre.', 'error'); return; }
+  if ((p.blisterUnits > 0) !== (p.blisterPrice > 0)) { toast('Blister: complete las unidades y el precio (o deje ambos en blanco).', 'error', 5000); return; }
+  if ((p.boxUnits > 0) !== (p.boxPrice > 0)) { toast('Caja: complete las unidades y el precio (o deje ambos en blanco).', 'error', 5000); return; }
+  if (p.blisterUnits > 0 && p.blisterPrice < p.cost * p.blisterUnits && !confirm('El precio del blister es menor a su costo. ¿Guardar de todos modos?')) return;
+  if (p.boxUnits > 0 && p.boxPrice < p.cost * p.boxUnits && !confirm('El precio de la caja es menor a su costo. ¿Guardar de todos modos?')) return;
   if (p.price < p.cost && !confirm('El precio de venta es menor al costo. ¿Guardar de todos modos?')) return;
   DB.saveProduct(p);
   closeModal();
@@ -293,6 +316,12 @@ function viewSell() {
         <button class="btn" style="margin-top:8px;width:100%" data-act="stopscan">Cerrar cámara</button>
         <p class="hint" style="margin-top:6px">Apunte al código de barras. Cada producto leído se suma a la venta.</p>
       </div>
+      <label for="scanPres" style="margin-top:0">Al escanear o escribir el código, agregar como</label>
+      <select id="scanPres">
+        <option value="unit" ${state.scanPres === 'unit' ? 'selected' : ''}>Unidad</option>
+        <option value="blister" ${state.scanPres === 'blister' ? 'selected' : ''}>Blister</option>
+        <option value="box" ${state.scanPres === 'box' ? 'selected' : ''}>Caja</option>
+      </select>
       <div class="row">
         <input id="manualCode" placeholder="Escribir o pasar lector USB" inputmode="numeric" autocomplete="off">
         <button class="btn" data-act="addcode">Agregar</button>
@@ -309,14 +338,26 @@ function viewSell() {
   </div>`;
 }
 
-function cartAdd(p) {
+const cartKey = c => c.id + '|' + c.pres;
+
+// unidades sueltas que lleva el carrito de un producto
+function unitsInCart(id) {
+  const p = DB.product(id);
+  return state.cart.filter(c => c.id === id).reduce((s, c) => s + c.qty * DB.pres(p, c.pres).units, 0);
+}
+
+function cartAdd(p, pres = 'unit') {
   if (daysToExpiry(p) < 0) { toast(`"${p.name}" está VENCIDO. No se puede vender.`, 'error', 5000); return; }
   if (p.stock <= 0) { toast(`"${p.name}" está agotado.`, 'error'); return; }
-  const line = state.cart.find(c => c.id === p.id);
-  if (line) {
-    if (line.qty + 1 > p.stock) { toast(`Solo hay ${p.stock} de "${p.name}".`, 'warn'); return; }
-    line.qty++;
-  } else state.cart.push({ id: p.id, qty: 1 });
+  const pr = DB.pres(p, pres);
+  if (pr.key !== pres) toast(`"${p.name}" no tiene esa presentación; se agregó por unidad.`, 'info', 3500);
+  const left = p.stock - unitsInCart(p.id);
+  if (pr.units > left) {
+    toast(`No alcanza para 1 ${pr.label.toLowerCase()} (${pr.units} unid.). Disponible: ${left} unidades.`, 'warn', 5000);
+    return;
+  }
+  const line = state.cart.find(c => c.id === p.id && c.pres === pr.key);
+  if (line) line.qty++; else state.cart.push({ id: p.id, pres: pr.key, qty: 1 });
   renderCart();
 }
 
@@ -325,11 +366,28 @@ function addByCode(code) {
   if (!c) return;
   const p = DB.byCode(c);
   if (!p) { toast(`Código ${c} no registrado en el inventario.`, 'error'); return; }
-  cartAdd(p);
+  cartAdd(p, state.scanPres);
+}
+
+// cambiar la presentación de una línea del carrito (unidad / blister / caja)
+function changePres(key, newPres) {
+  const c = state.cart.find(x => cartKey(x) === key);
+  if (!c) return;
+  const p = DB.product(c.id), pr = DB.pres(p, newPres);
+  const rest = state.cart.filter(x => x !== c);
+  const restUnits = rest.filter(x => x.id === c.id).reduce((s, x) => s + x.qty * DB.pres(p, x.pres).units, 0);
+  if (restUnits + c.qty * pr.units > p.stock) {
+    toast(`No alcanza el stock para ${c.qty} ${pr.label.toLowerCase()}(s). Quedan ${p.stock} unidades.`, 'warn', 5000);
+    renderCart();
+    return;
+  }
+  const same = rest.find(x => x.id === c.id && x.pres === pr.key);
+  if (same) { same.qty += c.qty; state.cart = rest; } else c.pres = pr.key;
+  renderCart();
 }
 
 function cartTotal() {
-  return state.cart.reduce((s, c) => s + DB.product(c.id).price * c.qty, 0);
+  return state.cart.reduce((s, c) => s + DB.pres(DB.product(c.id), c.pres).price * c.qty, 0);
 }
 
 function renderCart() {
@@ -341,14 +399,22 @@ function renderCart() {
   }
   const total = cartTotal();
   const lines = state.cart.map(c => {
-    const p = DB.product(c.id);
+    const p = DB.product(c.id), pr = DB.pres(p, c.pres), opts = DB.presList(p), key = cartKey(c);
+    const sel = opts.length > 1
+      ? `<select class="pres-sel" data-presel data-key="${key}">${opts.map(o =>
+          `<option value="${o.key}" ${o.key === pr.key ? 'selected' : ''}>${o.label}${o.units > 1 ? ' x' + o.units : ''} · ${money(o.price)}</option>`).join('')}</select>`
+      : '';
     return `<div class="cart-line">
-      <div><div class="n">${esc(p.name)}</div><div class="u">${money(p.price)} c/u · ${money(p.price * c.qty)}</div></div>
+      <div>
+        <div class="n">${esc(p.name)}</div>
+        ${sel}
+        <div class="u">${pr.label}${pr.units > 1 ? ' x' + pr.units : ''}: ${money(pr.price)} c/u · ${money(pr.price * c.qty)}</div>
+      </div>
       <div class="qty">
-        <button data-act="dec" data-id="${c.id}" aria-label="Quitar uno">−</button>
+        <button data-act="dec" data-key="${key}" aria-label="Quitar uno">−</button>
         <span>${c.qty}</span>
-        <button data-act="inc" data-id="${c.id}" aria-label="Agregar uno">+</button>
-        <button data-act="rm" data-id="${c.id}" aria-label="Quitar producto">✕</button>
+        <button data-act="inc" data-key="${key}" aria-label="Agregar uno">+</button>
+        <button data-act="rm" data-key="${key}" aria-label="Quitar producto">✕</button>
       </div></div>`;
   }).join('');
   box.innerHTML = `${lines}
@@ -432,9 +498,10 @@ function reportData() {
     if (d) { d.total += s.total; d.profit += s.profit; }
     pay[s.method] = (pay[s.method] || 0) + s.total;
     s.lines.forEach(l => {
-      units += l.qty;
+      const u = l.qty * (l.units || 1);   // unidades sueltas (blister/caja se convierten)
+      units += u;
       prod[l.name] = prod[l.name] || { name: l.name, qty: 0, revenue: 0 };
-      prod[l.name].qty += l.qty; prod[l.name].revenue += l.price * l.qty;
+      prod[l.name].qty += u; prod[l.name].revenue += l.price * l.qty;
     });
   });
 
@@ -537,9 +604,12 @@ const actions = {
   edit(el) { productForm(el.dataset.id); },
   restock(el) {
     const p = DB.product(el.dataset.id);
-    openModal(`<h2>Reponer stock</h2><p><b>${esc(p.name)}</b><br>Stock actual: ${p.stock}</p>
+    const opts = DB.presList(p);
+    openModal(`<h2>Reponer stock</h2><p><b>${esc(p.name)}</b><br>Stock actual: ${p.stock} unidades</p>
       <form id="rf" data-id="${p.id}"><label>Cantidad que ingresa</label>
       <input id="rfQty" type="number" min="1" step="1" required autofocus>
+      ${opts.length > 1 ? `<label>En qué presentación llegó</label><select id="rfPres">${opts.map(o =>
+        `<option value="${o.key}">${o.label}${o.units > 1 ? ` (${o.units} unid.)` : ''}</option>`).join('')}</select>` : ''}
       <button class="btn primary big" style="margin-top:16px" type="submit">Agregar al stock</button></form>`);
   },
   del(el) {
@@ -569,10 +639,19 @@ const actions = {
   },
   async stopscan() { await Scan.stop(); $('#readerWrap').hidden = true; },
   addcode() { const i = $('#manualCode'); addByCode(i.value); i.value = ''; i.focus(); },
-  addid(el) { const p = DB.product(el.dataset.id); if (p) cartAdd(p); $('#sellSearch').value = ''; $('#sellResults').innerHTML = ''; },
-  inc(el) { const p = DB.product(el.dataset.id); const l = state.cart.find(c => c.id === p.id); if (l.qty + 1 > p.stock) toast(`Solo hay ${p.stock} de "${p.name}".`, 'warn'); else { l.qty++; renderCart(); } },
-  dec(el) { const l = state.cart.find(c => c.id === el.dataset.id); l.qty--; if (l.qty <= 0) state.cart = state.cart.filter(c => c !== l); renderCart(); },
-  rm(el) { state.cart = state.cart.filter(c => c.id !== el.dataset.id); renderCart(); },
+  addid(el) { const p = DB.product(el.dataset.id); if (p) cartAdd(p, el.dataset.p || 'unit'); $('#sellSearch').value = ''; $('#sellResults').innerHTML = ''; },
+  inc(el) {
+    const c = state.cart.find(x => cartKey(x) === el.dataset.key); if (!c) return;
+    const p = DB.product(c.id), pr = DB.pres(p, c.pres);
+    if (unitsInCart(c.id) + pr.units > p.stock) toast(`No alcanza el stock de "${p.name}". Quedan ${p.stock} unidades.`, 'warn');
+    else { c.qty++; renderCart(); }
+  },
+  dec(el) {
+    const c = state.cart.find(x => cartKey(x) === el.dataset.key); if (!c) return;
+    c.qty--; if (c.qty <= 0) state.cart = state.cart.filter(x => x !== c);
+    renderCart();
+  },
+  rm(el) { state.cart = state.cart.filter(c => cartKey(c) !== el.dataset.key); renderCart(); },
   method(el) { state.method = el.dataset.m; renderCart(); },
   confirm: confirmSale,
   clearCart() { if (confirm('¿Cancelar la venta actual?')) { state.cart = []; state.received = ''; renderCart(); } }
@@ -590,7 +669,10 @@ document.addEventListener('submit', e => {
   if (e.target.id === 'pf') saveProductForm(e.target);
   if (e.target.id === 'rf') {
     const qty = parseInt($('#rfQty').value, 10);
-    if (qty > 0) { DB.restock(e.target.dataset.id, qty); closeModal(); toast('Stock actualizado', 'ok'); render(); }
+    const prod = DB.product(e.target.dataset.id);
+    const sel = $('#rfPres');
+    const units = qty * (sel && prod ? DB.pres(prod, sel.value).units : 1);
+    if (qty > 0) { DB.restock(e.target.dataset.id, units); closeModal(); toast(`Stock actualizado (+${units} unidades)`, 'ok'); render(); }
   }
 });
 
@@ -605,7 +687,8 @@ document.addEventListener('input', e => {
     if (q.length < 2) { box.innerHTML = ''; return; }
     const res = DB.products().filter(p => p.name.toLowerCase().includes(q)).slice(0, 6);
     box.innerHTML = res.length
-      ? res.map(p => `<button data-act="addid" data-id="${p.id}"><span>${esc(p.name)}</span><b>${money(p.price)} · stock ${p.stock}</b></button>`).join('')
+      ? res.map(p => `<div class="sug"><div class="sug-h"><span>${esc(p.name)}</span><small>stock ${p.stock} unid.</small></div>
+          <div class="sug-b">${DB.presList(p).map(o => `<button data-act="addid" data-id="${p.id}" data-p="${o.key}">${o.label}${o.units > 1 ? ' x' + o.units : ''} · ${money(o.price)}</button>`).join('')}</div></div>`).join('')
       : '<p class="hint">Sin resultados.</p>';
   } else if (t.id === 'sellerName') {
     try { localStorage.setItem(SELLER_KEY, t.value); } catch (err) { /* sin guardar */ }
@@ -616,7 +699,10 @@ document.addEventListener('input', e => {
 });
 
 document.addEventListener('change', e => {
-  if (e.target.dataset.range !== undefined) { state.range = Number(e.target.value); render(); }
+  const t = e.target;
+  if (t.dataset.range !== undefined) { state.range = Number(t.value); render(); }
+  else if (t.dataset.presel !== undefined) changePres(t.dataset.key, t.value);
+  else if (t.id === 'scanPres') state.scanPres = t.value;
 });
 
 document.addEventListener('keydown', e => {
@@ -666,12 +752,21 @@ function refresh() {
     if (l) l.innerHTML = listHtml(state.view === 'products');
   } else if (state.view === 'sell') {
     // si otro dispositivo vendió el mismo producto, ajusta lo que hay en el carrito
-    state.cart = state.cart.filter(c => {
-      const p = DB.product(c.id);
-      if (!p) return false;
-      if (c.qty > p.stock) c.qty = p.stock;
-      return c.qty > 0;
+    state.cart = state.cart.filter(c => DB.product(c.id));
+    state.cart.forEach(c => { c.pres = DB.pres(DB.product(c.id), c.pres).key; });
+    const byProd = {};
+    state.cart.forEach(c => { (byProd[c.id] = byProd[c.id] || []).push(c); });
+    Object.values(byProd).forEach(list => {
+      const p = DB.product(list[0].id);
+      let left = p.stock;
+      list.forEach(c => {
+        const u = DB.pres(p, c.pres).units;
+        const max = Math.floor(left / u);
+        if (c.qty > max) c.qty = max;
+        left -= c.qty * u;
+      });
     });
+    state.cart = state.cart.filter(c => c.qty > 0);
     renderCart();
   } else if (state.view === 'reports') {
     clearTimeout(reportTimer);
