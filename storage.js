@@ -102,13 +102,31 @@ window.DB = {
   byCode: code => products.find(p => p.code === String(code).trim()),
   sales: () => sales,
 
+  /* Presentaciones: el stock siempre se cuenta en UNIDADES sueltas.
+     pres(p, 'unit' | 'blister' | 'box') -> { key, label, units, price }
+     Si el producto no tiene esa presentación, devuelve la unidad. */
+  pres(p, key) {
+    if (key === "blister" && p.blisterUnits > 0 && p.blisterPrice > 0)
+      return { key, label: "Blister", units: p.blisterUnits, price: p.blisterPrice };
+    if (key === "box" && p.boxUnits > 0 && p.boxPrice > 0)
+      return { key, label: "Caja", units: p.boxUnits, price: p.boxPrice };
+    return { key: "unit", label: "Unidad", units: 1, price: p.price };
+  },
+  presList(p) {
+    return ["unit", "blister", "box"]
+      .map(k => this.pres(p, k))
+      .filter((o, i, arr) => arr.findIndex(x => x.key === o.key) === i);
+  },
+
   // Escritura
   saveProduct(p) {
     const id = p.id || doc(collection(fs, "products")).id;
     const data = {
       code: p.code, name: p.name, line: p.line,
       cost: p.cost, price: p.price,
-      stock: p.stock, minStock: p.minStock, expiry: p.expiry
+      stock: p.stock, minStock: p.minStock, expiry: p.expiry,
+      blisterUnits: p.blisterUnits || 0, blisterPrice: p.blisterPrice || 0,
+      boxUnits: p.boxUnits || 0, boxPrice: p.boxPrice || 0
     };
     setDoc(doc(fs, "products", id), data).catch(fail);
     return { id, ...data };
@@ -126,20 +144,35 @@ window.DB = {
   /* Registra la venta y DESCUENTA el stock en todos los dispositivos.
      items: [{id, qty}]  method: 'Yape' | 'Plin' | 'Efectivo' */
   addSale(items, method, received, by) {
-    for (const it of items) {
+    // 1) Calcular cuántas UNIDADES se llevan de cada producto
+    const need = {};
+    const rows = items.map(it => {
       const p = this.product(it.id);
       if (!p) throw new Error("Un producto de la venta ya no existe.");
-      if (p.stock < it.qty) throw new Error(`Stock insuficiente de "${p.name}" (quedan ${p.stock}).`);
+      const pr = this.pres(p, it.pres);
+      need[p.id] = (need[p.id] || 0) + it.qty * pr.units;
+      return { p, pr, qty: it.qty };
+    });
+    for (const id in need) {
+      const p = this.product(id);
+      if (p.stock < need[id]) throw new Error(`Stock insuficiente de "${p.name}" (quedan ${p.stock} unidades).`);
     }
 
+    // 2) Descontar el stock en la nube (en unidades) y avisar si queda bajo
     const batch = writeBatch(fs);
     const alerts = [];
-    const lines = items.map(it => {
-      const p = this.product(it.id);
-      batch.update(doc(fs, "products", p.id), { stock: increment(-it.qty) });
-      alerts.push({ name: p.name, left: p.stock - it.qty, min: p.minStock });
-      return { id: p.id, code: p.code, name: p.name, line: p.line, qty: it.qty, price: p.price, cost: p.cost };
-    });
+    for (const id in need) {
+      const p = this.product(id);
+      batch.update(doc(fs, "products", id), { stock: increment(-need[id]) });
+      alerts.push({ name: p.name, left: p.stock - need[id], min: p.minStock });
+    }
+
+    // 3) Detalle de la venta (precio y costo de la presentación vendida)
+    const lines = rows.map(({ p, pr, qty }) => ({
+      id: p.id, code: p.code, name: p.name, line: p.line,
+      pres: pr.key, presLabel: pr.label, units: pr.units, qty,
+      price: pr.price, cost: Math.round(p.cost * pr.units * 10000) / 10000
+    }));
 
     const total = round2(lines.reduce((s, l) => s + l.price * l.qty, 0));
     const profit = round2(lines.reduce((s, l) => s + (l.price - l.cost) * l.qty, 0));
