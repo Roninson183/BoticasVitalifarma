@@ -132,6 +132,17 @@ window.DB = {
     return { id, ...data };
   },
 
+  // Elimina productos del inventario (todos, o solo los de una sección). Las ventas NO se tocan.
+  async clearInventory(line) {
+    const targets = products.filter(p => !line || p.line === line);
+    for (let i = 0; i < targets.length; i += 400) {
+      const batch = writeBatch(fs);
+      targets.slice(i, i + 400).forEach(p => batch.delete(doc(fs, "products", p.id)));
+      await batch.commit();
+    }
+    return targets.length;
+  },
+
   removeProduct(id) {
     deleteDoc(doc(fs, "products", id)).catch(fail);
   },
