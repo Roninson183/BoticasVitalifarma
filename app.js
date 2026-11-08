@@ -226,7 +226,7 @@ function viewProducts() {
     <div id="list">${listHtml(true)}</div>
     <div class="card" style="margin-top:24px">
       <h2 style="font-size:17px">Respaldo de datos</h2>
-      <p class="hint" style="margin-bottom:10px">Los datos están en la nube y se sincronizan en todos los dispositivos. Puede descargar una copia cuando quiera.</p>
+      <p class="hint" style="margin-bottom:10px">Datos almacenados en la nube. Puedes descargar una copia cuando quieras</p>
       <div class="actions">
         <button class="btn" data-act="export">Descargar copia</button>
       </div>
@@ -310,7 +310,7 @@ function viewSell() {
   return `<div class="sell">
     <section class="card">
       <h2>Agregar productos</h2>
-      <button class="btn primary big" data-act="scan">📷 Escanear con la cámara</button>
+      <button class="btn primary big" data-act="scan">📷 Escanear producto</button>
       <div id="readerWrap" hidden>
         <div id="reader"></div>
         <button class="btn" style="margin-top:8px;width:100%" data-act="stopscan">Cerrar cámara</button>
@@ -331,7 +331,7 @@ function viewSell() {
     </section>
     <section class="card">
       <h2>Venta actual</h2>
-      <label for="sellerName" style="margin-top:0">Vendedor (quién atiende)</label>
+      <label for="sellerName" style="margin-top:0">Vendedor</label>
       <input id="sellerName" placeholder="Ej: Rosa" value="${esc(getSeller())}" autocomplete="off">
       <div id="cartBox"></div>
     </section>
