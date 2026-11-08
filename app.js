@@ -226,7 +226,7 @@ function viewProducts() {
     <div id="list">${listHtml(true)}</div>
     <div class="card" style="margin-top:24px">
       <h2 style="font-size:17px">Respaldo de datos</h2>
-      <p class="hint" style="margin-bottom:10px">Datos almacenados en la nube. Puedes descargar una copia cuando quieras</p>
+      <p class="hint" style="margin-bottom:10px">Los datos están en la nube y se sincronizan en todos los dispositivos. Puede descargar una copia cuando quiera.</p>
       <div class="actions">
         <button class="btn" data-act="export">Descargar copia</button>
       </div>
@@ -310,7 +310,7 @@ function viewSell() {
   return `<div class="sell">
     <section class="card">
       <h2>Agregar productos</h2>
-      <button class="btn primary big" data-act="scan">📷 Escanear producto</button>
+      <button class="btn primary big" data-act="scan">📷 Escanear con la cámara</button>
       <div id="readerWrap" hidden>
         <div id="reader"></div>
         <button class="btn" style="margin-top:8px;width:100%" data-act="stopscan">Cerrar cámara</button>
@@ -331,7 +331,7 @@ function viewSell() {
     </section>
     <section class="card">
       <h2>Venta actual</h2>
-      <label for="sellerName" style="margin-top:0">Vendedor</label>
+      <label for="sellerName" style="margin-top:0">Vendedor (quién atiende)</label>
       <input id="sellerName" placeholder="Ej: Rosa" value="${esc(getSeller())}" autocomplete="off">
       <div id="cartBox"></div>
     </section>
@@ -545,7 +545,79 @@ function viewReports() {
       <h2 style="font-size:17px">Últimas ventas</h2>
       <div class="h-row head"><span>Fecha</span><span>Pago</span><span>Total</span><span>Ganancia</span></div>
       ${hist || '<div class="empty">Todavía no hay ventas en este periodo.</div>'}
+    </div>
+    <div class="card danger-zone">
+      <h2 style="font-size:17px">Mantenimiento del inventario</h2>
+      <p class="hint" style="margin-bottom:12px">Permite eliminar los productos registrados. Las ventas ya hechas y estos reportes se conservan.</p>
+      <button class="btn danger" data-act="wipeStart">🗑️ Vaciar inventario</button>
     </div>`;
+}
+
+// ---------- Vaciar inventario (3 pasos de confirmación) ----------
+const wipe = { scope: 'all' };   // 'all' | 'vitalifarma' | 'natural'
+const wipeLabel = sc => sc === 'all' ? 'TODO el inventario' : LINES[sc];
+const wipeList = () => DB.products().filter(p => wipe.scope === 'all' || p.line === wipe.scope);
+
+function wipeStep1() {
+  const all = DB.products();
+  if (!all.length) { toast('El inventario ya está vacío.', 'info'); return; }
+  const units = all.reduce((s, p) => s + p.stock, 0);
+  openModal(`<h2>🗑️ Vaciar inventario</h2>
+    <p class="hint" style="margin-bottom:10px">Paso 1 de 3</p>
+    <p>Hay <b>${all.length}</b> producto(s) registrados, con <b>${units}</b> unidades en stock.</p>
+    <div class="alert-item orange" style="margin-top:12px">Esta acción elimina los productos para <b>todos los dispositivos</b> y no se puede deshacer. Las ventas ya registradas se conservan.</div>
+    <div class="actions" style="margin-top:14px">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button class="btn primary" data-act="wipeStep2">Continuar</button>
+    </div>`);
+}
+
+function wipeStep2() {
+  const count = sc => DB.products().filter(p => sc === 'all' || p.line === sc).length;
+  const opt = sc => `<button data-act="wipeScope" data-scope="${sc}" class="${wipe.scope === sc ? 'active' : ''}">
+      <span>${sc === 'all' ? 'Todo el inventario' : LINES[sc]}</span><b>${count(sc)} producto(s)</b></button>`;
+  openModal(`<h2>🗑️ ¿Qué desea vaciar?</h2>
+    <p class="hint" style="margin-bottom:6px">Paso 2 de 3</p>
+    <div class="scope-list">${opt('vitalifarma')}${opt('natural')}${opt('all')}</div>
+    <div class="actions">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button class="btn primary" data-act="wipeStep3">Continuar</button>
+    </div>`);
+}
+
+function wipeStep3() {
+  const list = wipeList();
+  if (!list.length) { toast('No hay productos en esa selección.', 'warn'); return; }
+  openModal(`<h2>⚠️ Confirmar eliminación</h2>
+    <p class="hint" style="margin-bottom:10px">Paso 3 de 3</p>
+    <p>Se eliminarán <b>${list.length}</b> producto(s) de <b>${esc(wipeLabel(wipe.scope))}</b>.</p>
+    <div class="alert-item red" style="margin-top:12px">Antes de borrar se descargará automáticamente una copia de respaldo en este equipo.</div>
+    <label for="wipeConfirm">Para confirmar, escriba <b>ELIMINAR</b></label>
+    <input id="wipeConfirm" autocomplete="off" autocapitalize="characters" placeholder="ELIMINAR">
+    <div class="actions" style="margin-top:14px">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button id="wipeGo" class="btn danger" data-act="wipeGo" disabled>Eliminar definitivamente</button>
+    </div>`);
+}
+
+async function wipeRun() {
+  const list = wipeList();
+  const input = $('#wipeConfirm');
+  if (!input || input.value.trim().toUpperCase() !== 'ELIMINAR') return;
+  if (!list.length) { closeModal(); return; }
+  const btn = $('#wipeGo');
+  btn.disabled = true; btn.textContent = 'Eliminando…';
+  actions.export();   // copia de respaldo antes de borrar
+  try {
+    const n = await DB.clearInventory(wipe.scope === 'all' ? null : wipe.scope);
+    state.cart = [];
+    closeModal();
+    toast(`Inventario vaciado: ${n} producto(s) eliminados.`, 'ok', 6000);
+    render();
+  } catch (e) {
+    toast('No se pudo vaciar el inventario: ' + (e && e.message ? e.message : e), 'error', 7000);
+    closeModal();
+  }
 }
 
 function drawCharts() {
@@ -631,6 +703,13 @@ const actions = {
     a.click(); URL.revokeObjectURL(a.href);
   },
 
+  // Vaciar inventario
+  wipeStart() { wipe.scope = 'all'; wipeStep1(); },
+  wipeStep2,
+  wipeStep3,
+  wipeScope(el) { wipe.scope = el.dataset.scope; wipeStep2(); },
+  wipeGo: wipeRun,
+
   // Venta
   async scan() {
     $('#readerWrap').hidden = false;
@@ -690,6 +769,9 @@ document.addEventListener('input', e => {
       ? res.map(p => `<div class="sug"><div class="sug-h"><span>${esc(p.name)}</span><small>stock ${p.stock} unid.</small></div>
           <div class="sug-b">${DB.presList(p).map(o => `<button data-act="addid" data-id="${p.id}" data-p="${o.key}">${o.label}${o.units > 1 ? ' x' + o.units : ''} · ${money(o.price)}</button>`).join('')}</div></div>`).join('')
       : '<p class="hint">Sin resultados.</p>';
+  } else if (t.id === 'wipeConfirm') {
+    const go = $('#wipeGo');
+    if (go) go.disabled = t.value.trim().toUpperCase() !== 'ELIMINAR';
   } else if (t.id === 'sellerName') {
     try { localStorage.setItem(SELLER_KEY, t.value); } catch (err) { /* sin guardar */ }
   } else if (t.id === 'recv') {
