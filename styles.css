@@ -249,3 +249,10 @@ body{background:radial-gradient(1200px 500px at 50% -100px,#e4e7ff,transparent),
 .suggest .sug-b{display:flex;gap:6px;flex-wrap:wrap}
 .suggest .sug-b button{flex:1;min-width:110px;justify-content:center;text-align:center;padding:8px 10px;font-size:13px;font-weight:700;border:1px solid var(--line);border-radius:8px;background:#fff}
 .suggest .sug-b button:hover{background:var(--g-soft);border-color:#b7bdf0}
+
+/* ---------- Vaciar inventario ---------- */
+.danger-zone{margin-top:16px;border-color:#efc0c4;background:#fffafa}
+.scope-list{display:grid;gap:8px;margin:12px 0 16px}
+.scope-list button{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px;border:2px solid var(--line);border-radius:10px;background:#fff;font-weight:700;text-align:left}
+.scope-list button b{font-size:13px;color:var(--muted)}
+.scope-list button.active{border-color:var(--red);background:var(--red-soft)}
