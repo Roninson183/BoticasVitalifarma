@@ -548,9 +548,99 @@ function viewReports() {
     </div>
     <div class="card danger-zone">
       <h2 style="font-size:17px">Mantenimiento del inventario</h2>
-      <p class="hint" style="margin-bottom:12px">Permite eliminar los productos registrados. Las ventas ya hechas y estos reportes se conservan.</p>
-      <button class="btn danger" data-act="wipeStart">🗑️ Vaciar inventario</button>
+      <p class="hint" style="margin-bottom:12px">Permite eliminar los productos registrados o el historial de ventas. Cada opción pide confirmación en 3 pasos.</p>
+      <div class="actions">
+        <button class="btn danger" data-act="wipeStart">🗑️ Vaciar inventario</button>
+        <button class="btn danger" data-act="salesStart">🗑️ Borrar historial de ventas</button>
+      </div>
     </div>`;
+}
+
+// ---------- Borrar historial de ventas (3 pasos de confirmación) ----------
+const salesWipe = { scope: 'all', all: [] };   // 'all' | 'period'
+
+function rangeStart() {
+  const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - (state.range - 1));
+  return d.getTime();
+}
+const salesInScope = (all, sc) => sc === 'all' ? all : all.filter(s => s.ts >= rangeStart());
+
+function downloadJSON(name, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function salesStep1() {
+  let all;
+  try { all = await DB.allSales(); }
+  catch (e) { toast('No se pudo leer el historial. Revise su conexión.', 'error'); return; }
+  salesWipe.all = all; salesWipe.scope = 'all';
+  if (!all.length) { toast('No hay ventas registradas para borrar.', 'info'); return; }
+  const total = all.reduce((s, x) => s + x.total, 0);
+  const profit = all.reduce((s, x) => s + x.profit, 0);
+  openModal(`<h2>🗑️ Borrar historial de ventas</h2>
+    <p class="hint" style="margin-bottom:10px">Paso 1 de 3</p>
+    <p>Hay <b>${all.length}</b> venta(s) registradas: <b>${money(total)}</b> vendidos y <b>${money(profit)}</b> de ganancia.</p>
+    <div class="alert-item orange" style="margin-top:12px">Se borrarán esas ventas y cambiarán los <b>reportes y gráficos</b> en todos los dispositivos. No se puede deshacer. El <b>stock de los productos no cambia</b>.</div>
+    <div class="actions" style="margin-top:14px">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button class="btn primary" data-act="salesStep2">Continuar</button>
+    </div>`);
+}
+
+function salesStep2() {
+  const opt = (sc, label) => `<button data-act="salesScope" data-scope="${sc}" class="${salesWipe.scope === sc ? 'active' : ''}">
+      <span>${label}</span><b>${salesInScope(salesWipe.all, sc).length} venta(s)</b></button>`;
+  openModal(`<h2>🗑️ ¿Qué ventas borrar?</h2>
+    <p class="hint" style="margin-bottom:6px">Paso 2 de 3</p>
+    <div class="scope-list">
+      ${opt('all', 'Todo el historial')}
+      ${opt('period', `Solo los últimos ${state.range} días (el periodo del reporte)`)}
+    </div>
+    <div class="actions">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button class="btn primary" data-act="salesStep3">Continuar</button>
+    </div>`);
+}
+
+function salesStep3() {
+  const list = salesInScope(salesWipe.all, salesWipe.scope);
+  if (!list.length) { toast('No hay ventas en esa selección.', 'warn'); return; }
+  const what = salesWipe.scope === 'all' ? 'todo el historial' : `los últimos ${state.range} días`;
+  openModal(`<h2>⚠️ Confirmar eliminación</h2>
+    <p class="hint" style="margin-bottom:10px">Paso 3 de 3</p>
+    <p>Se eliminarán <b>${list.length}</b> venta(s) de <b>${what}</b>.</p>
+    <div class="alert-item red" style="margin-top:12px">Antes de borrar se descargará automáticamente una copia de esas ventas en este equipo.</div>
+    <label for="salesConfirm">Para confirmar, escriba <b>ELIMINAR</b></label>
+    <input id="salesConfirm" autocomplete="off" autocapitalize="characters" placeholder="ELIMINAR">
+    <div class="actions" style="margin-top:14px">
+      <button class="btn" data-act="closeModal">Cancelar</button>
+      <button id="salesGo" class="btn danger" data-act="salesGo" disabled>Eliminar definitivamente</button>
+    </div>`);
+}
+
+async function salesRun() {
+  const input = $('#salesConfirm');
+  if (!input || input.value.trim().toUpperCase() !== 'ELIMINAR') return;
+  const btn = $('#salesGo');
+  btn.disabled = true; btn.textContent = 'Eliminando…';
+  try {
+    const list = salesInScope(await DB.allSales(), salesWipe.scope);
+    if (!list.length) { closeModal(); toast('No hay ventas para borrar.', 'info'); return; }
+    downloadJSON(`respaldo-ventas-${new Date().toISOString().slice(0, 10)}.json`, { sales: list });
+    const n = await DB.deleteSales(list);
+    closeModal();
+    toast(`Historial borrado: ${n} venta(s) eliminadas.`, 'ok', 6000);
+    render();
+  } catch (e) {
+    const denied = e && e.code === 'permission-denied';
+    toast(denied ? 'Firebase no permite borrar ventas. Falta actualizar las reglas de Firestore.'
+      : 'No se pudo borrar el historial: ' + (e && e.message ? e.message : e), 'error', 8000);
+    closeModal();
+  }
 }
 
 // ---------- Vaciar inventario (3 pasos de confirmación) ----------
@@ -703,6 +793,13 @@ const actions = {
     a.click(); URL.revokeObjectURL(a.href);
   },
 
+  // Borrar historial de ventas
+  salesStart: salesStep1,
+  salesStep2,
+  salesStep3,
+  salesScope(el) { salesWipe.scope = el.dataset.scope; salesStep2(); },
+  salesGo: salesRun,
+
   // Vaciar inventario
   wipeStart() { wipe.scope = 'all'; wipeStep1(); },
   wipeStep2,
@@ -769,6 +866,9 @@ document.addEventListener('input', e => {
       ? res.map(p => `<div class="sug"><div class="sug-h"><span>${esc(p.name)}</span><small>stock ${p.stock} unid.</small></div>
           <div class="sug-b">${DB.presList(p).map(o => `<button data-act="addid" data-id="${p.id}" data-p="${o.key}">${o.label}${o.units > 1 ? ' x' + o.units : ''} · ${money(o.price)}</button>`).join('')}</div></div>`).join('')
       : '<p class="hint">Sin resultados.</p>';
+  } else if (t.id === 'salesConfirm') {
+    const go = $('#salesGo');
+    if (go) go.disabled = t.value.trim().toUpperCase() !== 'ELIMINAR';
   } else if (t.id === 'wipeConfirm') {
     const go = $('#wipeGo');
     if (go) go.disabled = t.value.trim().toUpperCase() !== 'ELIMINAR';
