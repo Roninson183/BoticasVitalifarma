@@ -10,7 +10,7 @@ import { getAuth, onAuthStateChanged, signInAnonymously }
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, onSnapshot, setDoc, deleteDoc, updateDoc, increment,
-  writeBatch, query, where, orderBy
+  writeBatch, query, where, orderBy, getDocs
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
@@ -141,6 +141,22 @@ window.DB = {
       await batch.commit();
     }
     return targets.length;
+  },
+
+  // Historial de ventas completo (no solo los últimos 35 días)
+  async allSales() {
+    const snap = await getDocs(collection(fs, "sales"));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => a.ts - b.ts);
+  },
+
+  // Borra ventas del historial. El stock de los productos NO cambia.
+  async deleteSales(list) {
+    for (let i = 0; i < list.length; i += 400) {
+      const batch = writeBatch(fs);
+      list.slice(i, i + 400).forEach(s => batch.delete(doc(fs, "sales", s.id)));
+      await batch.commit();
+    }
+    return list.length;
   },
 
   removeProduct(id) {
